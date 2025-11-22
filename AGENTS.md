@@ -15,6 +15,7 @@ Repo copies of this file wrap the shared content in `<shared>…</shared>` and t
 - Ask the user before adding dependencies, changing build tooling, or altering project-wide configuration.
 - When discussing dependencies, always provide a GitHub URL.
 - Keep the project’s `AGENTS.md` `<tools></tools>` block in sync with the full tool list from `TOOLS.md` so downstream repos get the latest tool descriptions.
+- GitHub CLI: when someone shares a GitHub issue/PR URL (e.g., `https://github.com/steipete/CodexBar/issues/9` or `/pull/5`), use `gh` to read it—do not web-search. Examples: `gh issue view <url> --comments -R owner/repo` and `gh pr view <url> --comments --files -R owner/repo`. If only a number is given, derive the repo from the URL or the current checkout and still use `gh` to fetch details.
 
 ### tmux & Long Tasks
 - Run any command that could hang (tests, servers, log streams, browser automation) inside tmux using the repository’s preferred entry point.
