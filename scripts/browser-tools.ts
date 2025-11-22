@@ -56,20 +56,24 @@ program
   .option('--profile', 'Copy your default Chrome profile before launch.', false)
   .option('--profile-dir <path>', 'Directory for the temporary Chrome profile.', DEFAULT_PROFILE_DIR)
   .option('--chrome-path <path>', 'Path to the Chrome binary.', DEFAULT_CHROME_BIN)
+  .option('--kill-existing', 'Stop any running Google Chrome before launch (default: false).', false)
   .action(async (options) => {
-    const { port, profile, profileDir, chromePath } = options as {
+    const { port, profile, profileDir, chromePath, killExisting } = options as {
       port: number;
       profile: boolean;
       profileDir: string;
       chromePath: string;
+      killExisting: boolean;
     };
 
-    try {
-      execSync("killall 'Google Chrome'", { stdio: 'ignore' });
-    } catch {
-      // ignore missing processes
+    if (killExisting) {
+      try {
+        execSync("killall 'Google Chrome'", { stdio: 'ignore' });
+      } catch {
+        // ignore missing processes
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
     execSync(`mkdir -p "${profileDir}"`);
     if (profile) {
       const source = `${path.join(os.homedir(), 'Library', 'Application Support', 'Google', 'Chrome')}/`;
@@ -339,16 +343,25 @@ program
     const follow = options.follow as boolean;
     const timeout = options.timeout as number | undefined;
     const typesFilter = options.types as string | undefined;
-    const colorFlag = options.color as boolean | undefined;
     const noSerialize = options.noSerialize as boolean;
     const serialize = !noSerialize;
+
+    // Track explicit color flags by looking at argv to avoid Commander defaults overriding TTY detection.
+    const argv = process.argv.slice(2);
+    const colorFlag = argv.includes('--color') ? true : argv.includes('--no-color') ? false : undefined;
 
     // Determine if we should use colors: explicit flag or TTY auto-detection
     const useColor = colorFlag ?? process.stdout.isTTY;
 
     // Parse types filter
+    const normalizeType = (value: string) => {
+      const lower = value.toLowerCase();
+      if (lower === 'warning') return 'warn';
+      return lower;
+    };
+
     const allowedTypes = typesFilter
-      ? new Set(typesFilter.split(',').map((t) => t.trim().toLowerCase()))
+      ? new Set(typesFilter.split(',').map((t) => normalizeType(t.trim())))
       : null; // null means show all types
 
     // Color functions (no-op if colors disabled)
@@ -361,6 +374,7 @@ program
 
     const typeColors: Record<string, (text: string) => string> = {
       error: red,
+      warn: yellow,
       warning: yellow,
       info: cyan,
       debug: gray,
@@ -436,7 +450,7 @@ program
     try {
       // Set up console listener
       page.on('console', async (msg) => {
-        const type = msg.type();
+        const type = normalizeType(msg.type());
         if (allowedTypes && !allowedTypes.has(type)) {
           return; // Filter out unwanted types
         }
@@ -456,8 +470,26 @@ program
       if (follow) {
         // Continuous monitoring mode
         console.log(gray('Monitoring console logs (Ctrl+C to stop)...'));
-        // Keep the connection alive
-        await new Promise(() => {}); // Never resolves, wait for Ctrl+C
+        const waitForExit = () =>
+          new Promise<void>((resolve) => {
+            const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+            const onSignal = () => {
+              cleanup();
+              resolve();
+            };
+            const onBeforeExit = () => {
+              cleanup();
+              resolve();
+            };
+            const cleanup = () => {
+              signals.forEach((signal) => process.off(signal, onSignal));
+              process.off('beforeExit', onBeforeExit);
+            };
+            signals.forEach((signal) => process.on(signal, onSignal));
+            process.on('beforeExit', onBeforeExit);
+          });
+
+        await waitForExit();
       } else {
         // One-shot mode with timeout
         const duration = timeout ?? 5;
